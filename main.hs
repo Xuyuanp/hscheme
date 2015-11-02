@@ -4,6 +4,7 @@ module Main where
 import Control.Monad
 import Control.Monad.Error
 import Data.IORef
+import Data.Maybe
 import System.Environment
 import System.IO
 import Text.ParserCombinators.Parsec hiding (spaces)
@@ -17,7 +18,7 @@ data LispVal = Atom String
              | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
              | Func {
                     params :: [String],
-                    vararg :: (Maybe String),
+                    vararg :: Maybe String,
                     body :: [LispVal],
                     closure :: Env
                     }
@@ -90,10 +91,10 @@ liftThrows (Left err)  = throwError err
 liftThrows (Right val) = return val
 
 runIOThrows :: IOThrowsError String -> IO String
-runIOThrows action = runErrorT (trapError action) >>= return . extractValue
+runIOThrows action = liftM extractValue (runErrorT (trapError action))
 
 isBound :: Env -> String -> IO Bool
-isBound envRef var = readIORef envRef >>= return .maybe False (const True) . lookup var
+isBound envRef var = liftM (isJust . lookup var) (readIORef envRef)
 
 getVar :: Env -> String -> IOThrowsError LispVal
 getVar envRef var = do
@@ -106,7 +107,7 @@ setVar :: Env -> String -> LispVal -> IOThrowsError LispVal
 setVar envRef var value = do
         env <- liftIO $ readIORef envRef
         maybe (throwError $ UnboundVar "Setting an unbound variable" var)
-            (liftIO .(flip writeIORef value))
+            (liftIO . flip writeIORef value)
             (lookup var env)
         return value
 
@@ -229,7 +230,7 @@ eval _ badForm                                                                  
 apply :: LispVal -> [LispVal] -> IOThrowsError LispVal
 apply (PrimitiveFunc func) args = liftThrows $ func args
 apply (Func params_ varargs body_ closure_) args =
-        if num params_ /= num args && varargs == Nothing
+        if num params_ /= num args && isNothing varargs
             then throwError $ NumArgs (num params_) args
             else (liftIO $ bindVars closure_ $ zip params_ args) >>= bindVarArgs varargs >>= evalBody
         where
@@ -237,7 +238,7 @@ apply (Func params_ varargs body_ closure_) args =
             num = toInteger . length
             evalBody env = liftM last $ mapM (eval env) body_
             bindVarArgs arg env = case arg of
-                                      Just argName -> liftIO $ bindVars env [(argName, List $ remainingArgs)]
+                                      Just argName -> liftIO $ bindVars env [(argName, List remainingArgs)]
                                       Nothing -> return env
 apply (IOFunc func) args = func args
 
@@ -310,7 +311,7 @@ unpackNum (Number n) = return n
 unpackNum (String n) = let parsed = reads n :: [(Integer, String)] in
                            if null parsed
                               then throwError $ TypeMismatch "number" $ String n
-                              else return $ fst $ parsed !! 0
+                              else return $ fst $ head parsed
 unpackNum (List [n]) = unpackNum n
 unpackNum notNum     = throwError $ TypeMismatch "number" notNum
 
@@ -418,14 +419,12 @@ evalAntPrint env expr = evalString env expr >>= putStrLn
 until_ :: Monad m => (a -> Bool) -> m a -> (a -> m ()) -> m ()
 until_ pred1 prompt action = do
         result <- prompt
-        if pred1 result
-            then return ()
-            else action result >> until_ pred1 prompt action
+        unless (pred1 result) $ action result >> until_ pred1 prompt action
 
 runOne :: [String] -> IO ()
 runOne args = do
         env <- primitiveBindings >>= flip bindVars [("args", List $ map String $ drop 1 args)]
-        (runIOThrows $ liftM show $ eval env (List [Atom "load", String (args !! 0)])) >>= hPutStrLn stderr
+        (runIOThrows $ liftM show $ eval env (List [Atom "load", String (head args)])) >>= hPutStrLn stderr
 
 runRepl :: IO ()
 runRepl = primitiveBindings >>= until_ (== "quit") (readPrompt "Lisp>>> ") . evalAntPrint
@@ -433,4 +432,4 @@ runRepl = primitiveBindings >>= until_ (== "quit") (readPrompt "Lisp>>> ") . eva
 main :: IO ()
 main = do
         args <- getArgs
-        if null args then runRepl else runOne $ args
+        if null args then runRepl else runOne args
