@@ -1,13 +1,13 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module Main where
 
-import Control.Monad
-import Control.Monad.Error
-import Data.IORef
-import Data.Maybe
-import System.Environment
-import System.IO
-import Text.ParserCombinators.Parsec hiding (spaces)
+import           Control.Monad
+import           Control.Monad.Error
+import           Data.IORef
+import           Data.Maybe
+import           System.Environment
+import           System.IO
+import           Text.ParserCombinators.Parsec hiding (spaces)
 
 data LispVal = Atom String
              | List [LispVal]
@@ -17,9 +17,9 @@ data LispVal = Atom String
              | Bool Bool
              | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
              | Func {
-                    params :: [String],
-                    vararg :: Maybe String,
-                    body :: [LispVal],
+                    params  :: [String],
+                    vararg  :: Maybe String,
+                    body    :: [LispVal],
                     closure :: Env
                     }
             | IOFunc ([LispVal] -> IOThrowsError LispVal)
@@ -413,8 +413,8 @@ readPrompt prompt = flushStr prompt >> getLine
 evalString :: Env -> String -> IO String
 evalString env expr = runIOThrows $ liftM show $ (liftThrows $ readExpr expr) >>= eval env
 
-evalAntPrint :: Env -> String -> IO ()
-evalAntPrint env expr = evalString env expr >>= putStrLn
+evalAndPrint :: Env -> String -> IO ()
+evalAndPrint env expr = evalString env expr >>= putStrLn
 
 until_ :: Monad m => (a -> Bool) -> m a -> (a -> m ()) -> m ()
 until_ pred1 prompt action = do
@@ -427,7 +427,7 @@ runOne args = do
         (runIOThrows $ liftM show $ eval env (List [Atom "load", String (head args)])) >>= hPutStrLn stderr
 
 runRepl :: IO ()
-runRepl = primitiveBindings >>= until_ (== "quit") (readPrompt "Lisp>>> ") . evalAntPrint
+runRepl = primitiveBindings >>= until_ (== "quit") (readPrompt "Lisp>>> ") . evalAndPrint
 
 main :: IO ()
 main = do
